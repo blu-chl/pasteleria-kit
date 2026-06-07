@@ -400,7 +400,7 @@ export default function RecetasPage() {
                 <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
                   <th className="text-left px-4 py-3">Ingrediente</th>
                   <th className="text-left px-4 py-3">Cantidad <span className="normal-case font-normal text-gray-400">(ej: 300 g, 4 und, 200 ml)</span></th>
-                  <th className="text-right px-4 py-3">Costo ($)</th>
+                  <th className="text-right px-4 py-3">Costo ($) <span className="normal-case font-normal text-gray-400">calculado</span></th>
                   <th className="text-left px-4 py-3 text-gray-300">Precio ref.</th>
                   <th className="w-10 px-4 py-3"></th>
                 </tr>
@@ -459,21 +459,21 @@ export default function RecetasPage() {
                         <input
                           className="w-full bg-transparent rounded px-1 py-0.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all"
                           value={ing.cantidad}
-                          placeholder={stockMatch ? `ej: 300 ${stockMatch.unidad === "kg" ? "g" : stockMatch.unidad}` : "ej: 300 g"}
+                          placeholder={stockMatch
+                            ? stockMatch.unidad === "kg" ? "ej: 300 g"
+                            : stockMatch.unidad === "litro" || stockMatch.unidad === "lt" ? "ej: 200 ml"
+                            : `ej: 1 ${stockMatch.unidad}`
+                            : "ej: 300 g"}
                           onChange={(e) => updateIngLocal(idx, "cantidad", e.target.value)}
                           onBlur={() => onCantidadBlur(idx)}
                         />
                       </td>
-                      {/* Costo calculado (editable) */}
-                      <td className="px-3 py-1.5">
-                        <input
-                          type="number" min={0}
-                          className="w-full text-right bg-transparent rounded px-1 py-0.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all"
-                          value={ing.costo || ""}
-                          placeholder="0"
-                          onChange={(e) => updateIngLocal(idx, "costo", parseFloat(e.target.value) || 0)}
-                          onBlur={(e) => saveIngrediente(ing.id, "costo", parseFloat(e.target.value) || 0)}
-                        />
+                      {/* Costo — solo lectura, calculado automáticamente */}
+                      <td className="px-3 py-1.5 text-right">
+                        {ing.costo > 0
+                          ? <span className="font-medium text-gray-800">${ing.costo.toLocaleString("es-CL")}</span>
+                          : <span className="text-gray-300 text-xs">escribe cantidad con unidad</span>
+                        }
                       </td>
                       {/* Precio referencia */}
                       <td className="px-3 py-1.5 text-xs whitespace-nowrap">
