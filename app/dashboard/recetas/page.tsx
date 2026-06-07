@@ -419,23 +419,60 @@ export default function RecetasPage() {
 
                   return (
                     <tr key={ing.id} className="border-b border-gray-50 hover:bg-amber-50/10 group">
+                      {/* Desplegable de ingredientes del stock */}
                       <td className="px-3 py-1.5">
-                        <input
-                          className="w-full bg-transparent rounded px-1 py-0.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all"
+                        <select
+                          className="w-full bg-transparent rounded px-1 py-1 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all text-sm"
                           value={ing.ingrediente_nombre}
-                          onChange={(e) => updateIngLocal(idx, "ingrediente_nombre", e.target.value)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            // Actualizar nombre
+                            updateIngLocal(idx, "ingrediente_nombre", val);
+                            // Si hay cantidad ya escrita, recalcular costo con el nuevo ingrediente
+                            const stockMatch2 = stockItems.find((s) => s.nombre === val);
+                            if (stockMatch2 && ing.cantidad) {
+                              const costo = calcularCosto(ing.cantidad, stockMatch2);
+                              if (costo !== null) {
+                                setTimeout(() => updateIngLocal(idx, "costo", costo), 0);
+                              }
+                            }
+                          }}
                           onBlur={() => onNombreBlur(idx)}
-                        />
+                        >
+                          <option value={ing.ingrediente_nombre}>{ing.ingrediente_nombre}</option>
+                          <option disabled>──────────────</option>
+                          {stockItems
+                            .filter((s) => s.nombre !== ing.ingrediente_nombre)
+                            .map((s) => (
+                              <option key={s.id} value={s.nombre}>
+                                {s.nombre} ({s.unidad} · ${s.precio_unitario.toLocaleString("es-CL")})
+                              </option>
+                            ))}
+                          <option disabled>──────────────</option>
+                          <option value="otro">✏️ Escribir manualmente…</option>
+                        </select>
+                        {/* Si eligió "otro", mostrar input manual */}
+                        {ing.ingrediente_nombre === "otro" && (
+                          <input
+                            autoFocus
+                            placeholder="Nombre del ingrediente"
+                            className="mt-1 w-full border border-amber-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+                            onChange={(e) => updateIngLocal(idx, "ingrediente_nombre", e.target.value)}
+                            onBlur={() => onNombreBlur(idx)}
+                          />
+                        )}
                       </td>
+                      {/* Cantidad */}
                       <td className="px-3 py-1.5">
                         <input
                           className="w-full bg-transparent rounded px-1 py-0.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all"
                           value={ing.cantidad}
-                          placeholder="ej: 300 g"
+                          placeholder={stockMatch ? `ej: 300 ${stockMatch.unidad === "kg" ? "g" : stockMatch.unidad}` : "ej: 300 g"}
                           onChange={(e) => updateIngLocal(idx, "cantidad", e.target.value)}
                           onBlur={() => onCantidadBlur(idx)}
                         />
                       </td>
+                      {/* Costo calculado (editable) */}
                       <td className="px-3 py-1.5">
                         <input
                           type="number" min={0}
@@ -446,8 +483,11 @@ export default function RecetasPage() {
                           onBlur={(e) => saveIngrediente(ing.id, "costo", parseFloat(e.target.value) || 0)}
                         />
                       </td>
-                      <td className="px-3 py-1.5 text-xs text-gray-300 whitespace-nowrap">
-                        {precioRef ?? <span className="text-orange-300">sin precio</span>}
+                      {/* Precio referencia */}
+                      <td className="px-3 py-1.5 text-xs whitespace-nowrap">
+                        {precioRef
+                          ? <span className="text-green-600 font-medium">{precioRef}</span>
+                          : <span className="text-orange-300">sin precio</span>}
                       </td>
                       <td className="px-3 py-1.5 text-center">
                         <button
