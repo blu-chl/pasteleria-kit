@@ -185,21 +185,23 @@ export default function RecetasPage() {
     await supabase.from("receta_ingredientes").update({ [field]: value }).eq("id", ingId);
   }
 
-  // Actualiza ingrediente localmente y recalcula costo si cambia la cantidad
+  // Recalcula costo en tiempo real dado nombre + cantidad actuales
+  function recalcularCosto(nombreIng: string, cantidadStr: string): number | null {
+    const stock = stockItems.find((s) => s.nombre === nombreIng) || matchStock(nombreIng, stockItems);
+    return calcularCosto(cantidadStr, stock || null);
+  }
+
   function updateIngLocal(idx: number, field: keyof Ingrediente, value: string | number) {
     if (!selected) return;
     const ing = selected.ingredientes[idx];
     const updatedIng = { ...ing, [field]: value };
 
-    // Si cambia la cantidad o el nombre, recalcular costo automáticamente
+    // Siempre recalcular costo al cambiar nombre o cantidad
     if (field === "cantidad" || field === "ingrediente_nombre") {
-      const nombreBuscar = field === "ingrediente_nombre" ? String(value) : ing.ingrediente_nombre;
-      const cantidadBuscar = field === "cantidad" ? String(value) : ing.cantidad;
-      const stockMatch = matchStock(nombreBuscar, stockItems);
-      const costoCalculado = calcularCosto(cantidadBuscar, stockMatch);
-      if (costoCalculado !== null) {
-        updatedIng.costo = costoCalculado;
-      }
+      const nombre = field === "ingrediente_nombre" ? String(value) : ing.ingrediente_nombre;
+      const cantidad = field === "cantidad" ? String(value) : ing.cantidad;
+      const costo = recalcularCosto(nombre, cantidad);
+      if (costo !== null) updatedIng.costo = costo;
     }
 
     const updated = selected.ingredientes.map((i, j) => j === idx ? updatedIng : i);
@@ -425,17 +427,7 @@ export default function RecetasPage() {
                           className="w-full bg-transparent rounded px-1 py-1 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all text-sm"
                           value={ing.ingrediente_nombre}
                           onChange={(e) => {
-                            const val = e.target.value;
-                            // Actualizar nombre
-                            updateIngLocal(idx, "ingrediente_nombre", val);
-                            // Si hay cantidad ya escrita, recalcular costo con el nuevo ingrediente
-                            const stockMatch2 = stockItems.find((s) => s.nombre === val);
-                            if (stockMatch2 && ing.cantidad) {
-                              const costo = calcularCosto(ing.cantidad, stockMatch2);
-                              if (costo !== null) {
-                                setTimeout(() => updateIngLocal(idx, "costo", costo), 0);
-                              }
-                            }
+                            updateIngLocal(idx, "ingrediente_nombre", e.target.value);
                           }}
                           onBlur={() => onNombreBlur(idx)}
                         >
