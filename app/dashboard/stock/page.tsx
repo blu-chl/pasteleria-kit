@@ -212,7 +212,7 @@ export default function StockPage() {
             onClick={() => { setShowUsarReceta(true); setRecetaSeleccionada(null); setLineas([]); }}
             className="bg-white hover:bg-amber-50 border border-amber-300 text-amber-700 text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
           >
-            🧁 Usar receta
+            🧁 Usé esta receta (descontar del inventario)
           </button>
           <button
             onClick={() => setAdding(true)}
@@ -235,7 +235,7 @@ export default function StockPage() {
         <div className="mb-6 bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-gray-800">🧁 Usar receta — descontar del stock</h2>
+              <h2 className="font-semibold text-gray-800">🧁 Usé esta receta (descontar del inventario) — descontar del stock</h2>
               <p className="text-xs text-gray-400 mt-0.5">Selecciona una receta, ajusta las cantidades si cambiaste algo, y aplica el descuento</p>
             </div>
             <button onClick={() => setShowUsarReceta(false)} className="text-gray-300 hover:text-gray-500 text-lg">✕</button>
