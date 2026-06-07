@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase";
 
-type Ingrediente = { id: string; nombre: string; cantidad: string; costo: number };
+type Ingrediente = { id: string; ingrediente_nombre: string; cantidad: string; costo: number };
 type Receta = {
   id: string;
   nombre: string;
@@ -17,33 +17,33 @@ const RECETAS_DEFAULT: Omit<Receta, "id">[] = [
     nombre: "Torta de Chocolate (molde 20cm — rinde 12 porciones)",
     porciones: 12, margen: 55, costo_envase: 600,
     ingredientes: [
-      { id: "", nombre: "Harina", cantidad: "300 g", costo: 360 },
-      { id: "", nombre: "Azúcar blanca", cantidad: "200 g", costo: 180 },
-      { id: "", nombre: "Mantequilla", cantidad: "100 g", costo: 450 },
-      { id: "", nombre: "Huevos", cantidad: "4 und", costo: 800 },
-      { id: "", nombre: "Cacao en polvo", cantidad: "50 g", costo: 240 },
-      { id: "", nombre: "Polvo de hornear", cantidad: "10 g", costo: 60 },
-      { id: "", nombre: "Leche entera", cantidad: "200 ml", costo: 180 },
-      { id: "", nombre: "Vainilla", cantidad: "5 ml", costo: 80 },
-      { id: "", nombre: "Chocolate cobertura", cantidad: "200 g", costo: 1300 },
-      { id: "", nombre: "Crema de leche", cantidad: "100 ml", costo: 320 },
-      { id: "", nombre: "Gas / energía", cantidad: "estimado", costo: 500 },
+      { id: "", ingrediente_nombre: "Harina", cantidad: "300 g", costo: 360 },
+      { id: "", ingrediente_nombre: "Azúcar blanca", cantidad: "200 g", costo: 180 },
+      { id: "", ingrediente_nombre: "Mantequilla", cantidad: "100 g", costo: 450 },
+      { id: "", ingrediente_nombre: "Huevos", cantidad: "4 und", costo: 800 },
+      { id: "", ingrediente_nombre: "Cacao en polvo", cantidad: "50 g", costo: 240 },
+      { id: "", ingrediente_nombre: "Polvo de hornear", cantidad: "10 g", costo: 60 },
+      { id: "", ingrediente_nombre: "Leche entera", cantidad: "200 ml", costo: 180 },
+      { id: "", ingrediente_nombre: "Vainilla", cantidad: "5 ml", costo: 80 },
+      { id: "", ingrediente_nombre: "Chocolate cobertura", cantidad: "200 g", costo: 1300 },
+      { id: "", ingrediente_nombre: "Crema de leche", cantidad: "100 ml", costo: 320 },
+      { id: "", ingrediente_nombre: "Gas / energía", cantidad: "estimado", costo: 500 },
     ],
   },
   {
     nombre: "Cheesecake (molde 22cm — rinde 10 porciones)",
     porciones: 10, margen: 55, costo_envase: 800,
     ingredientes: [
-      { id: "", nombre: "Queso crema", cantidad: "500 g", costo: 3600 },
-      { id: "", nombre: "Azúcar blanca", cantidad: "180 g", costo: 162 },
-      { id: "", nombre: "Huevos", cantidad: "3 und", costo: 600 },
-      { id: "", nombre: "Crema de leche", cantidad: "200 ml", costo: 640 },
-      { id: "", nombre: "Vainilla", cantidad: "5 ml", costo: 80 },
-      { id: "", nombre: "Mantequilla", cantidad: "80 g", costo: 360 },
-      { id: "", nombre: "Galletas para base", cantidad: "200 g", costo: 1200 },
-      { id: "", nombre: "Maicena", cantidad: "10 g", costo: 14 },
-      { id: "", nombre: "Fresas decorac.", cantidad: "200 g", costo: 500 },
-      { id: "", nombre: "Gas / energía", cantidad: "estimado", costo: 500 },
+      { id: "", ingrediente_nombre: "Queso crema", cantidad: "500 g", costo: 3600 },
+      { id: "", ingrediente_nombre: "Azúcar blanca", cantidad: "180 g", costo: 162 },
+      { id: "", ingrediente_nombre: "Huevos", cantidad: "3 und", costo: 600 },
+      { id: "", ingrediente_nombre: "Crema de leche", cantidad: "200 ml", costo: 640 },
+      { id: "", ingrediente_nombre: "Vainilla", cantidad: "5 ml", costo: 80 },
+      { id: "", ingrediente_nombre: "Mantequilla", cantidad: "80 g", costo: 360 },
+      { id: "", ingrediente_nombre: "Galletas para base", cantidad: "200 g", costo: 1200 },
+      { id: "", ingrediente_nombre: "Maicena", cantidad: "10 g", costo: 14 },
+      { id: "", ingrediente_nombre: "Fresas decorac.", cantidad: "200 g", costo: 500 },
+      { id: "", ingrediente_nombre: "Gas / energía", cantidad: "estimado", costo: 500 },
     ],
   },
 ];
@@ -84,7 +84,7 @@ export default function RecetasPage() {
           .select()
           .single();
         if (receta) {
-          const ings = r.ingredientes.map((i) => ({ nombre: i.nombre, cantidad: i.cantidad, costo: i.costo, receta_id: receta.id }));
+          const ings = r.ingredientes.map((i) => ({ ingrediente_nombre: i.ingrediente_nombre, cantidad: i.cantidad, costo: i.costo, receta_id: receta.id }));
           await supabase.from("receta_ingredientes").insert(ings);
         }
       }
@@ -104,7 +104,7 @@ export default function RecetasPage() {
       if (r.ingredientes.length === 0) {
         const defaultReceta = RECETAS_DEFAULT.find((d) => d.nombre === r.nombre);
         if (defaultReceta) {
-          const ings = defaultReceta.ingredientes.map((i) => ({ nombre: i.nombre, cantidad: i.cantidad, costo: i.costo, receta_id: r.id }));
+          const ings = defaultReceta.ingredientes.map((i) => ({ ingrediente_nombre: i.ingrediente_nombre, cantidad: i.cantidad, costo: i.costo, receta_id: r.id }));
           await supabase.from("receta_ingredientes").insert(ings);
         }
       }
@@ -161,7 +161,7 @@ export default function RecetasPage() {
     const supabase = createClient();
     const { data, error } = await supabase
       .from("receta_ingredientes")
-      .insert({ receta_id: selected.id, nombre: "Nuevo ingrediente", cantidad: "", costo: 0 })
+      .insert({ receta_id: selected.id, ingrediente_nombre: "Nuevo ingrediente", cantidad: "", costo: 0 })
       .select()
       .single();
     if (error) { setError(error.message); setSaving(false); return; }
@@ -352,9 +352,9 @@ export default function RecetasPage() {
                     <td className="px-3 py-1.5">
                       <input
                         className="w-full bg-transparent rounded px-1 py-0.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-300 border border-transparent focus:border-amber-300 transition-all"
-                        value={ing.nombre}
-                        onChange={(e) => updateIngLocal(idx, "nombre", e.target.value)}
-                        onBlur={(e) => saveIngrediente(ing.id, "nombre", e.target.value)}
+                        value={ing.ingrediente_nombre}
+                        onChange={(e) => updateIngLocal(idx, "ingrediente_nombre", e.target.value)}
+                        onBlur={(e) => saveIngrediente(ing.id, "ingrediente_nombre", e.target.value)}
                       />
                     </td>
                     <td className="px-3 py-1.5">
