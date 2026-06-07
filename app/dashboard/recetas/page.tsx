@@ -74,32 +74,89 @@ function parseCantidadStr(str: string): { valor: number; unidad: string } {
   };
 }
 
-// Convierte valor de la unidad de receta a la unidad del stock
-function convertir(valor: number, unidadReceta: string, unidadStock: string): number {
-  const ur = unidadReceta.toLowerCase().trim();
-  const us = unidadStock.toLowerCase().trim();
+// Familias de unidades
+const FAMILIA: Record<string, string> = {
+  g: "peso", gr: "peso", gramo: "peso", gramos: "peso",
+  kg: "peso", kilo: "peso", kilos: "peso",
+  ml: "volumen", cc: "volumen", cl: "volumen",
+  l: "volumen", lt: "volumen", lts: "volumen", litro: "volumen", litros: "volumen",
+  und: "unidad", un: "unidad", u: "unidad", unidad: "unidad", unidades: "unidad",
+  docena: "docena", docenas: "docena",
+};
 
-  // gramos → kg
-  if (ur === "g" && (us === "kg" || us === "kilo" || us === "kilos")) return valor / 1000;
-  // ml → litro
-  if (ur === "ml" && (us === "litro" || us === "lt" || us === "l" || us === "lts")) return valor / 1000;
-  // cl → litro
-  if (ur === "cl" && (us === "litro" || us === "lt" || us === "l")) return valor / 100;
-  // unidades → docena
-  if ((ur === "und" || ur === "un" || ur === "unidad" || ur === "unidades") && us === "docena") return valor / 12;
-  // docena → unidades (inverso)
-  if (ur === "docena" && (us === "und" || us === "un" || us === "unidad")) return valor * 12;
-  // mismo sistema: misma unidad o sin unidad
+function getFamilia(u: string): string {
+  const s = u.toLowerCase().trim();
+  if (FAMILIA[s]) return FAMILIA[s];
+  if (/^\d+g$/.test(s)) return "peso";
+  if (/^\d+ml$/.test(s)) return "volumen";
+  return "otro";
+}
+
+// Unidad más chica para asumir cuando el usuario no escribe unidad
+function unidadAsumida(unidadStock: string): string {
+  const f = getFamilia(unidadStock);
+  if (f === "peso")    return "g";
+  if (f === "volumen") return "ml";
+  if (f === "docena")  return "und";
+  return unidadStock;
+}
+
+function convertirValor(valor: number, ur: string, us: string): number {
+  const u = ur.toLowerCase().trim();
+  const s = us.toLowerCase().trim();
+  if ((u === "g" || u === "gr" || u === "gramo" || u === "gramos") && (s === "kg" || s === "kilo" || s === "kilos")) return valor / 1000;
+  if (u === "kg" && (s === "g" || s === "gr")) return valor * 1000;
+  if (u === "ml" && (s === "litro" || s === "lt" || s === "l" || s === "lts")) return valor / 1000;
+  if (u === "cl" && (s === "litro" || s === "lt" || s === "l")) return valor / 100;
+  if (u === "litro" && s === "ml") return valor * 1000;
+  if ((u === "und" || u === "un" || u === "unidad" || u === "unidades") && (s === "docena" || s === "docenas")) return valor / 12;
+  if ((u === "docena" || u === "docenas") && (s === "und" || s === "un" || s === "unidad")) return valor * 12;
+  // unidades compuestas: "100g", "250g", "50ml"
+  const matchNum = u.match(/^(\d+)(g|ml)$/);
+  if (matchNum) {
+    const base = parseFloat(matchNum[1]);
+    const subU = matchNum[2];
+    if (subU === "g" && (s === "kg" || s === "kilo")) return (valor * base) / 1000;
+    if (subU === "ml" && (s === "litro" || s === "lt" || s === "l")) return (valor * base) / 1000;
+  }
   return valor;
 }
 
-// Calcula el costo automáticamente dado el string de cantidad y el item de stock
-function calcularCosto(cantidadStr: string, stock: StockItem | null): number | null {
-  if (!stock) return null;
+type InfoCalculo = {
+  costo: number | null;
+  asumio: string | null;      // unidad que asumió automáticamente
+  incompatible: boolean;      // unidades de distinta familia
+};
+
+function calcularInfo(cantidadStr: string, stock: StockItem | null): InfoCalculo {
+  if (!stock || !cantidadStr.trim()) return { costo: null, asumio: null, incompatible: false };
   const { valor, unidad } = parseCantidadStr(cantidadStr);
-  if (valor <= 0) return null;
-  const valorConvertido = convertir(valor, unidad || stock.unidad, stock.unidad);
-  return Math.round(valorConvertido * stock.precio_unitario);
+  if (valor <= 0) return { costo: null, asumio: null, incompatible: false };
+
+  const us = stock.unidad;
+  let urFinal = unidad;
+  let asumio: string | null = null;
+
+  if (!unidad) {
+    // Sin unidad: asumir automáticamente
+    urFinal = unidadAsumida(us);
+    asumio = urFinal;
+  } else {
+    // Con unidad: verificar compatibilidad
+    const famR = getFamilia(unidad);
+    const famS = getFamilia(us);
+    if (famR !== "otro" && famS !== "otro" && famR !== famS) {
+      return { costo: null, asumio: null, incompatible: true };
+    }
+  }
+
+  const valorConv = convertirValor(valor, urFinal, us);
+  const costo = Math.round(valorConv * stock.precio_unitario);
+  return { costo: costo > 0 ? costo : null, asumio, incompatible: false };
+}
+
+function calcularCosto(cantidadStr: string, stock: StockItem | null): number | null {
+  return calcularInfo(cantidadStr, stock).costo;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,22 +242,16 @@ export default function RecetasPage() {
     await supabase.from("receta_ingredientes").update({ [field]: value }).eq("id", ingId);
   }
 
-  // Recalcula costo en tiempo real dado nombre + cantidad actuales
-  function recalcularCosto(nombreIng: string, cantidadStr: string): number | null {
-    const stock = stockItems.find((s) => s.nombre === nombreIng) || matchStock(nombreIng, stockItems);
-    return calcularCosto(cantidadStr, stock || null);
-  }
-
   function updateIngLocal(idx: number, field: keyof Ingrediente, value: string | number) {
     if (!selected) return;
     const ing = selected.ingredientes[idx];
     const updatedIng = { ...ing, [field]: value };
 
-    // Siempre recalcular costo al cambiar nombre o cantidad
     if (field === "cantidad" || field === "ingrediente_nombre") {
       const nombre = field === "ingrediente_nombre" ? String(value) : ing.ingrediente_nombre;
       const cantidad = field === "cantidad" ? String(value) : ing.cantidad;
-      const costo = recalcularCosto(nombre, cantidad);
+      const stock = stockItems.find((s) => s.nombre === nombre) || matchStock(nombre, stockItems);
+      const { costo } = calcularInfo(cantidad, stock || null);
       if (costo !== null) updatedIng.costo = costo;
     }
 
@@ -414,10 +465,11 @@ export default function RecetasPage() {
                   </tr>
                 )}
                 {selected.ingredientes.map((ing, idx) => {
-                  const stockMatch = matchStock(ing.ingrediente_nombre, stockItems);
+                  const stockMatch = stockItems.find((s) => s.nombre === ing.ingrediente_nombre) || matchStock(ing.ingrediente_nombre, stockItems);
                   const precioRef = stockMatch
                     ? `$${stockMatch.precio_unitario.toLocaleString("es-CL")}/${stockMatch.unidad}`
                     : null;
+                  const info = calcularInfo(ing.cantidad, stockMatch || null);
 
                   return (
                     <tr key={ing.id} className="border-b border-gray-50 hover:bg-amber-50/10 group">
@@ -470,10 +522,18 @@ export default function RecetasPage() {
                       </td>
                       {/* Costo — solo lectura, calculado automáticamente */}
                       <td className="px-3 py-1.5 text-right">
-                        {ing.costo > 0
-                          ? <span className="font-medium text-gray-800">${ing.costo.toLocaleString("es-CL")}</span>
-                          : <span className="text-gray-300 text-xs">escribe cantidad con unidad</span>
-                        }
+                        {info.incompatible ? (
+                          <span className="text-xs text-red-500 font-medium">⚠️ unidad incorrecta</span>
+                        ) : info.costo !== null ? (
+                          <div>
+                            <span className="font-medium text-gray-800">${info.costo.toLocaleString("es-CL")}</span>
+                            {info.asumio && (
+                              <div className="text-xs text-amber-500">asumiendo {info.asumio}</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-300 text-xs">ingresa cantidad</span>
+                        )}
                       </td>
                       {/* Precio referencia */}
                       <td className="px-3 py-1.5 text-xs whitespace-nowrap">
