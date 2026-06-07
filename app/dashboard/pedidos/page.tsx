@@ -21,14 +21,25 @@ const emptyPedido = (): NewPedido => ({
   estado: "Pendiente", notas: "",
 });
 
+type RecetaResumen = {
+  id: string;
+  nombre: string;
+  porciones: number;
+  margen: number;
+  costo_envase: number;
+  precio_sugerido: number;
+};
+
 export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<NewPedido>(emptyPedido());
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [recetas, setRecetas] = useState<RecetaResumen[]>([]);
+  const [recetaSeleccionada, setRecetaSeleccionada] = useState("");
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadRecetas(); }, []);
 
   async function load() {
     const supabase = createClient();
@@ -37,6 +48,38 @@ export default function PedidosPage() {
     const { data } = await supabase.from("pedidos").select("*").eq("user_id", user.id).order("fecha_entrega", { ascending: true });
     setPedidos(data || []);
     setLoading(false);
+  }
+
+  async function loadRecetas() {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    // Traer recetas con sus ingredientes y el stock para calcular precio sugerido
+    const { data: rs } = await supabase
+      .from("recetas")
+      .select("id, nombre, porciones, margen, costo_envase, receta_ingredientes(costo)")
+      .eq("user_id", user.id);
+    const { data: stock } = await supabase.from("stock").select("nombre, precio_unitario, unidad").eq("user_id", user.id);
+
+    const mapped: RecetaResumen[] = (rs || []).map((r: any) => {
+      const costoIngs = (r.receta_ingredientes || []).reduce((s: number, i: any) => s + (Number(i.costo) || 0), 0);
+      const costoTotal = costoIngs + (r.costo_envase || 0);
+      const precioSugerido = r.margen < 100 ? Math.round(costoTotal / (1 - r.margen / 100)) : 0;
+      return { id: r.id, nombre: r.nombre, porciones: r.porciones, margen: r.margen, costo_envase: r.costo_envase, precio_sugerido: precioSugerido };
+    });
+    setRecetas(mapped);
+  }
+
+  function aplicarReceta(recetaId: string) {
+    setRecetaSeleccionada(recetaId);
+    if (!recetaId) return;
+    const r = recetas.find((r) => r.id === recetaId);
+    if (!r) return;
+    setForm((prev) => ({
+      ...prev,
+      descripcion: r.nombre.split("(")[0].trim(),
+      precio_total: r.precio_sugerido,
+    }));
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -48,6 +91,7 @@ export default function PedidosPage() {
     const numero = (pedidos.length > 0 ? Math.max(...pedidos.map((p) => p.numero)) : 0) + 1;
     await supabase.from("pedidos").insert({ ...form, user_id: user.id, numero });
     setForm(emptyPedido());
+    setRecetaSeleccionada("");
     setShowForm(false);
     await load();
     setSaving(false);
@@ -103,6 +147,31 @@ export default function PedidosPage() {
       {showForm && (
         <form onSubmit={handleAdd} className="bg-white rounded-2xl border border-amber-100 shadow-sm p-5 mb-6">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">Nuevo pedido</h2>
+
+          {/* Selector de receta */}
+          <div className="mb-4 bg-amber-50 border border-amber-100 rounded-xl p-3">
+            <label className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1.5 block">
+              🧁 Basar en una receta (opcional)
+            </label>
+            <select
+              value={recetaSeleccionada}
+              onChange={(e) => aplicarReceta(e.target.value)}
+              className="w-full border border-amber-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+            >
+              <option value="">— Sin receta base, llenar manualmente —</option>
+              {recetas.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.nombre.split("(")[0].trim()} — precio sugerido: ${r.precio_sugerido.toLocaleString("es-CL")}
+                </option>
+              ))}
+            </select>
+            {recetaSeleccionada && (
+              <p className="text-xs text-amber-600 mt-1.5">
+                ✅ Descripción y precio pre-rellenados. Puedes editarlos abajo.
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-gray-500">Nombre cliente</label>
@@ -144,7 +213,7 @@ export default function PedidosPage() {
             </div>
           </div>
           <div className="mt-3 flex gap-2 justify-end">
-            <button type="button" onClick={() => setShowForm(false)} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2">Cancelar</button>
+            <button type="button" onClick={() => { setShowForm(false); setRecetaSeleccionada(""); setForm(emptyPedido()); }} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2">Cancelar</button>
             <button type="submit" disabled={saving} className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-5 py-2 rounded-xl disabled:opacity-60 transition-colors">
               {saving ? "Guardando..." : "Guardar pedido"}
             </button>
