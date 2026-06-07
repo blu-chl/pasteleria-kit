@@ -18,10 +18,57 @@ const DEFAULTS: Omit<StockItem, "id" | "user_id">[] = [
 
 type EditRow = Partial<Omit<StockItem, "id" | "user_id">>;
 
+type Receta = {
+  id: string;
+  nombre: string;
+  porciones: number;
+  ingredientes: { id: string; ingrediente_nombre: string; cantidad: string; costo: number }[];
+};
+
+// Línea de descuento: ingrediente de receta + cuánto descontar del stock
+type LineaDescuento = {
+  ingrediente_nombre: string;
+  cantidad_receta: string; // texto original de la receta
+  descuento: number;       // número editable que se restará del stock
+  stock_id: string | null; // id del item de stock que matchea
+  stock_nombre: string;
+  stock_unidad: string;
+  stock_actual: number;
+};
+
 function semaforo(actual: number, minimo: number) {
   if (actual <= 0) return { label: "🔴 SIN STOCK", color: "text-red-600 bg-red-50" };
   if (actual <= minimo) return { label: "🟡 REPONER YA", color: "text-yellow-700 bg-yellow-50" };
   return { label: "🟢 OK", color: "text-green-700 bg-green-50" };
+}
+
+// Intenta extraer un número de una string como "300 g", "4 und", "200 ml"
+function parseCantidad(str: string): number {
+  const match = str.match(/[\d,.]+/);
+  if (!match) return 0;
+  return parseFloat(match[0].replace(",", "."));
+}
+
+// Convierte g → kg, ml → litro si el stock usa esa unidad
+function convertirUnidad(valor: number, cantidadStr: string, unidadStock: string): number {
+  const lower = cantidadStr.toLowerCase();
+  const stockL = unidadStock.toLowerCase();
+  if ((lower.includes(" g") || lower.endsWith("g")) && !lower.includes("kg") && (stockL === "kg" || stockL === "kilo")) {
+    return valor / 1000;
+  }
+  if (lower.includes("ml") && (stockL === "litro" || stockL === "lt" || stockL === "l")) {
+    return valor / 1000;
+  }
+  return valor;
+}
+
+// Busca el stock item que mejor matchea el nombre del ingrediente
+function matchStock(nombre: string, items: StockItem[]): StockItem | null {
+  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const n = norm(nombre);
+  return items.find((i) => norm(i.nombre) === n)
+    || items.find((i) => norm(i.nombre).includes(n) || n.includes(norm(i.nombre)))
+    || null;
 }
 
 export default function StockPage() {
@@ -33,7 +80,15 @@ export default function StockPage() {
   const [newRow, setNewRow] = useState<EditRow>({});
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  // Usar receta
+  const [recetas, setRecetas] = useState<Receta[]>([]);
+  const [showUsarReceta, setShowUsarReceta] = useState(false);
+  const [recetaSeleccionada, setRecetaSeleccionada] = useState<Receta | null>(null);
+  const [lineas, setLineas] = useState<LineaDescuento[]>([]);
+  const [descontando, setDescontando] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+
+  useEffect(() => { load(); loadRecetas(); }, []);
 
   async function load() {
     const supabase = createClient();
@@ -41,7 +96,6 @@ export default function StockPage() {
     if (!user) return;
     const { data } = await supabase.from("stock").select("*").eq("user_id", user.id).order("nombre");
     if (data && data.length === 0) {
-      // Seed con defaults
       const rows = DEFAULTS.map((d) => ({ ...d, user_id: user.id }));
       await supabase.from("stock").insert(rows);
       const { data: fresh } = await supabase.from("stock").select("*").eq("user_id", user.id).order("nombre");
@@ -50,6 +104,68 @@ export default function StockPage() {
       setItems(data || []);
     }
     setLoading(false);
+  }
+
+  async function loadRecetas() {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase
+      .from("recetas")
+      .select("*, receta_ingredientes(*)")
+      .eq("user_id", user.id)
+      .order("nombre");
+    if (data) {
+      setRecetas(data.map((r: any) => ({ ...r, ingredientes: r.receta_ingredientes || [] })));
+    }
+  }
+
+  // Al seleccionar una receta, arma las líneas de descuento
+  function seleccionarReceta(receta: Receta) {
+    setRecetaSeleccionada(receta);
+    const nuevasLineas: LineaDescuento[] = receta.ingredientes
+      .filter((ing) => !ing.ingrediente_nombre.toLowerCase().includes("gas") && !ing.ingrediente_nombre.toLowerCase().includes("energía"))
+      .map((ing) => {
+        const match = matchStock(ing.ingrediente_nombre, items);
+        const valorRaw = parseCantidad(ing.cantidad);
+        const valorConvertido = match ? convertirUnidad(valorRaw, ing.cantidad, match.unidad) : valorRaw;
+        return {
+          ingrediente_nombre: ing.ingrediente_nombre,
+          cantidad_receta: ing.cantidad,
+          descuento: valorConvertido,
+          stock_id: match?.id || null,
+          stock_nombre: match?.nombre || "⚠️ No encontrado en stock",
+          stock_unidad: match?.unidad || "",
+          stock_actual: match?.stock_actual || 0,
+        };
+      });
+    setLineas(nuevasLineas);
+  }
+
+  async function aplicarDescuento() {
+    setDescontando(true);
+    const supabase = createClient();
+    let errores = 0;
+
+    for (const linea of lineas) {
+      if (!linea.stock_id || linea.descuento <= 0) continue;
+      const item = items.find((i) => i.id === linea.stock_id);
+      if (!item) continue;
+      const nuevoStock = Math.max(0, item.stock_actual - linea.descuento);
+      const { error } = await supabase
+        .from("stock")
+        .update({ stock_actual: nuevoStock })
+        .eq("id", linea.stock_id);
+      if (error) errores++;
+    }
+
+    await load();
+    setDescontando(false);
+    setShowUsarReceta(false);
+    setRecetaSeleccionada(null);
+    setLineas([]);
+    setMensaje(errores === 0 ? "✅ Stock actualizado correctamente" : `⚠️ Listo con ${errores} error(es)`);
+    setTimeout(() => setMensaje(""), 4000);
   }
 
   async function saveEdit(id: string) {
@@ -89,16 +205,148 @@ export default function StockPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">📦 Control de Stock</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Actualiza el stock cada vez que recibes una compra o usas ingredientes</p>
+          <p className="text-sm text-gray-500 mt-0.5">Actualiza el stock o descuenta automáticamente al hacer una receta</p>
         </div>
-        <button
-          onClick={() => setAdding(true)}
-          className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
-        >
-          + Agregar ingrediente
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowUsarReceta(true); setRecetaSeleccionada(null); setLineas([]); }}
+            className="bg-white hover:bg-amber-50 border border-amber-300 text-amber-700 text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+          >
+            🧁 Usar receta
+          </button>
+          <button
+            onClick={() => setAdding(true)}
+            className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+          >
+            + Agregar ingrediente
+          </button>
+        </div>
       </div>
 
+      {/* Mensaje de éxito */}
+      {mensaje && (
+        <div className="mb-4 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl">
+          {mensaje}
+        </div>
+      )}
+
+      {/* Panel: Usar receta */}
+      {showUsarReceta && (
+        <div className="mb-6 bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-800">🧁 Usar receta — descontar del stock</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Selecciona una receta, ajusta las cantidades si cambiaste algo, y aplica el descuento</p>
+            </div>
+            <button onClick={() => setShowUsarReceta(false)} className="text-gray-300 hover:text-gray-500 text-lg">✕</button>
+          </div>
+
+          <div className="p-5">
+            {/* Selector de receta */}
+            <div className="mb-4">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">¿Qué receta hiciste?</label>
+              <div className="flex flex-wrap gap-2">
+                {recetas.length === 0 && <p className="text-sm text-gray-400">No tienes recetas creadas aún.</p>}
+                {recetas.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => seleccionarReceta(r)}
+                    className={`px-3 py-1.5 rounded-xl text-sm font-medium border transition-colors ${
+                      recetaSeleccionada?.id === r.id
+                        ? "bg-amber-500 text-white border-amber-500"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-amber-300 hover:text-amber-700"
+                    }`}
+                  >
+                    {r.nombre.split("(")[0].trim()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tabla de líneas editables */}
+            {recetaSeleccionada && lineas.length > 0 && (
+              <>
+                <div className="rounded-xl border border-gray-100 overflow-hidden mb-4">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
+                        <th className="text-left px-4 py-2.5">Ingrediente (receta)</th>
+                        <th className="text-left px-4 py-2.5">Cantidad original</th>
+                        <th className="text-left px-4 py-2.5">Item en stock</th>
+                        <th className="text-right px-4 py-2.5">Stock actual</th>
+                        <th className="text-right px-4 py-2.5">Descontar</th>
+                        <th className="text-right px-4 py-2.5">Quedará</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lineas.map((linea, idx) => {
+                        const quedara = Math.max(0, linea.stock_actual - linea.descuento);
+                        const sinMatch = !linea.stock_id;
+                        return (
+                          <tr key={idx} className={`border-b border-gray-50 ${sinMatch ? "bg-orange-50/40" : ""}`}>
+                            <td className="px-4 py-2 font-medium text-gray-700">{linea.ingrediente_nombre}</td>
+                            <td className="px-4 py-2 text-gray-400 text-xs">{linea.cantidad_receta}</td>
+                            <td className="px-4 py-2">
+                              {sinMatch ? (
+                                <span className="text-xs text-orange-500">⚠️ No encontrado en stock</span>
+                              ) : (
+                                <span className="text-gray-600">{linea.stock_nombre} <span className="text-gray-400">({linea.stock_unidad})</span></span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2 text-right text-gray-600">{linea.stock_actual} {linea.stock_unidad}</td>
+                            <td className="px-4 py-2 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                disabled={sinMatch}
+                                value={linea.descuento}
+                                onChange={(e) => {
+                                  const updated = [...lineas];
+                                  updated[idx] = { ...linea, descuento: parseFloat(e.target.value) || 0 };
+                                  setLineas(updated);
+                                }}
+                                className="w-20 text-right border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50 disabled:text-gray-300"
+                              />
+                              <span className="text-xs text-gray-400 ml-1">{linea.stock_unidad}</span>
+                            </td>
+                            <td className={`px-4 py-2 text-right font-medium text-sm ${quedara <= 0 ? "text-red-500" : quedara <= (items.find(i => i.id === linea.stock_id)?.stock_minimo || 0) ? "text-yellow-600" : "text-green-700"}`}>
+                              {sinMatch ? "—" : `${quedara.toFixed(2)} ${linea.stock_unidad}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-400">
+                    💡 Ajusta los valores en la columna <strong>Descontar</strong> si usaste cantidades distintas a la receta original
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setRecetaSeleccionada(null); setLineas([]); }}
+                      className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={aplicarDescuento}
+                      disabled={descontando}
+                      className="bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2 rounded-xl transition-colors"
+                    >
+                      {descontando ? "Aplicando..." : "✅ Aplicar descuento al stock"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tabla de stock */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -167,7 +415,6 @@ export default function StockPage() {
               );
             })}
 
-            {/* Fila nueva */}
             {adding && (
               <tr className="border-b border-amber-100 bg-amber-50/30">
                 <td className="px-4 py-2"><input autoFocus placeholder="Nombre" className="border rounded px-2 py-1 text-sm w-full" value={newRow.nombre ?? ""} onChange={(e) => setNewRow({ ...newRow, nombre: e.target.value })} /></td>
