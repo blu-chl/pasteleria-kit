@@ -345,7 +345,13 @@ export default function RecetasPage() {
     </div>
   );
 
-  const costoIngredientes = selected ? selected.ingredientes.reduce((s, i) => s + (Number(i.costo) || 0), 0) : 0;
+  // Calcular costos siempre al vuelo desde precio de stock — nunca usar el valor guardado en DB
+  const costoIngredientes = selected ? selected.ingredientes.reduce((s, i) => {
+    const stock = stockItems.find((st) => st.nombre === i.ingrediente_nombre) || matchStock(i.ingrediente_nombre, stockItems);
+    const { costo } = calcularInfo(i.cantidad, stock || null);
+    // Si hay costo calculado usarlo; si no, usar ing.costo como fallback (ej: gas/energía manual)
+    return s + (costo !== null ? costo : (Number(i.costo) || 0));
+  }, 0) : 0;
   const costoTotal = selected ? costoIngredientes + (Number(selected.costo_envase) || 0) : 0;
   const precioSugerido = selected && selected.margen < 100 ? costoTotal / (1 - selected.margen / 100) : 0;
   const gananciaPorUnidad = selected && selected.porciones > 0 ? (precioSugerido - costoTotal) / selected.porciones : 0;
