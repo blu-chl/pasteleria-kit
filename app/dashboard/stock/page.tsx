@@ -88,6 +88,20 @@ export default function StockPage() {
   const [descontando, setDescontando] = useState(false);
   const [mensaje, setMensaje] = useState("");
 
+  // Registrar compra
+  const [showCompra, setShowCompra] = useState(false);
+  const [compraItemId, setCompraItemId] = useState("");
+  const [compraCantidad, setCompraCantidad] = useState("");
+  const [compraPrecioTotal, setCompraPrecioTotal] = useState("");
+  const [comprando, setComprando] = useState(false);
+
+  const precioUnitarioCalculado = (() => {
+    const cant = parseFloat(compraCantidad);
+    const total = parseFloat(compraPrecioTotal);
+    if (cant > 0 && total > 0) return Math.round(total / cant);
+    return null;
+  })();
+
   useEffect(() => { load(); loadRecetas(); }, []);
 
   async function load() {
@@ -168,6 +182,30 @@ export default function StockPage() {
     setTimeout(() => setMensaje(""), 4000);
   }
 
+  async function aplicarCompra() {
+    if (!compraItemId || !compraCantidad || !compraPrecioTotal) return;
+    setComprando(true);
+    const supabase = createClient();
+    const item = items.find((i) => i.id === compraItemId);
+    if (!item) { setComprando(false); return; }
+    const cant = parseFloat(compraCantidad);
+    const total = parseFloat(compraPrecioTotal);
+    const nuevoPrecioUnit = Math.round(total / cant);
+    const nuevoStock = item.stock_actual + cant;
+    await supabase.from("stock").update({
+      stock_actual: nuevoStock,
+      precio_unitario: nuevoPrecioUnit,
+    }).eq("id", compraItemId);
+    setMensaje(`✅ Compra registrada — ${item.nombre}: +${cant} ${item.unidad} · Nuevo precio: $${nuevoPrecioUnit.toLocaleString("es-CL")}/${item.unidad}`);
+    setShowCompra(false);
+    setCompraItemId("");
+    setCompraCantidad("");
+    setCompraPrecioTotal("");
+    await load();
+    setComprando(false);
+    setTimeout(() => setMensaje(""), 6000);
+  }
+
   async function saveEdit(id: string) {
     setSaving(true);
     const supabase = createClient();
@@ -207,9 +245,15 @@ export default function StockPage() {
           <h1 className="text-2xl font-bold text-gray-900">📦 Control de Stock</h1>
           <p className="text-sm text-gray-500 mt-0.5">Actualiza el stock o descuenta automáticamente al hacer una receta</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
-            onClick={() => { setShowUsarReceta(true); setRecetaSeleccionada(null); setLineas([]); }}
+            onClick={() => { setShowCompra(true); setShowUsarReceta(false); }}
+            className="bg-green-500 hover:bg-green-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+          >
+            🛒 Registrar compra
+          </button>
+          <button
+            onClick={() => { setShowUsarReceta(true); setShowCompra(false); setRecetaSeleccionada(null); setLineas([]); }}
             className="bg-white hover:bg-amber-50 border border-amber-300 text-amber-700 text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
           >
             🧁 Usé esta receta (descontar del inventario)
@@ -227,6 +271,95 @@ export default function StockPage() {
       {mensaje && (
         <div className="mb-4 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl">
           {mensaje}
+        </div>
+      )}
+
+      {/* Panel: Registrar compra */}
+      {showCompra && (
+        <div className="mb-6 bg-white rounded-2xl border border-green-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-800">🛒 Registrar compra</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Ingresa qué compraste, la cantidad y el precio total pagado — el precio unitario y el stock se actualizan solos</p>
+            </div>
+            <button onClick={() => setShowCompra(false)} className="text-gray-300 hover:text-gray-500 text-lg">✕</button>
+          </div>
+          <div className="p-5">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              {/* Ingrediente */}
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Ingrediente</label>
+                <select
+                  value={compraItemId}
+                  onChange={(e) => { setCompraItemId(e.target.value); setCompraCantidad(""); setCompraPrecioTotal(""); }}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                >
+                  <option value="">Selecciona...</option>
+                  {items.map((i) => (
+                    <option key={i.id} value={i.id}>{i.nombre} ({i.unidad})</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Cantidad comprada */}
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
+                  Cantidad comprada {compraItemId && <span className="text-green-600 normal-case font-normal">({items.find(i => i.id === compraItemId)?.unidad})</span>}
+                </label>
+                <input
+                  type="number" min={0} step="any"
+                  placeholder={compraItemId ? `ej: 25 ${items.find(i => i.id === compraItemId)?.unidad}` : "ej: 25"}
+                  value={compraCantidad}
+                  onChange={(e) => setCompraCantidad(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              {/* Precio total pagado */}
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Precio total pagado ($)</label>
+                <input
+                  type="number" min={0}
+                  placeholder="ej: 17750"
+                  value={compraPrecioTotal}
+                  onChange={(e) => setCompraPrecioTotal(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              {/* Precio unitario calculado */}
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Precio unitario calculado</label>
+                <div className={`rounded-xl px-3 py-2.5 text-sm border font-semibold ${precioUnitarioCalculado ? "border-green-200 bg-green-50 text-green-700" : "border-gray-100 bg-gray-50 text-gray-300"}`}>
+                  {precioUnitarioCalculado
+                    ? `$${precioUnitarioCalculado.toLocaleString("es-CL")} / ${items.find(i => i.id === compraItemId)?.unidad ?? ""}`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+
+            {/* Resumen antes de confirmar */}
+            {precioUnitarioCalculado && compraItemId && (
+              <div className="mt-4 bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-sm text-green-800 flex flex-wrap gap-6 items-center">
+                <span>📦 <strong>{items.find(i => i.id === compraItemId)?.nombre}</strong></span>
+                <span>Stock actual: <strong>{items.find(i => i.id === compraItemId)?.stock_actual} {items.find(i => i.id === compraItemId)?.unidad}</strong></span>
+                <span>+ Compra: <strong>{compraCantidad} {items.find(i => i.id === compraItemId)?.unidad}</strong></span>
+                <span>= Nuevo stock: <strong>{(parseFloat(items.find(i => i.id === compraItemId)?.stock_actual?.toString() ?? "0") + parseFloat(compraCantidad)).toLocaleString("es-CL")} {items.find(i => i.id === compraItemId)?.unidad}</strong></span>
+                <span>Nuevo precio ref.: <strong>${precioUnitarioCalculado.toLocaleString("es-CL")}/{items.find(i => i.id === compraItemId)?.unidad}</strong></span>
+              </div>
+            )}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowCompra(false)} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2">Cancelar</button>
+              <button
+                onClick={aplicarCompra}
+                disabled={comprando || !compraItemId || !compraCantidad || !compraPrecioTotal}
+                className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white text-sm font-semibold px-5 py-2 rounded-xl transition-colors"
+              >
+                {comprando ? "Registrando..." : "✅ Registrar compra"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
